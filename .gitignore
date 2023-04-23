@@ -1,0 +1,6 @@
+inventory_backups/*
+inventory_info/*
+chats_to_update.json
+previous_prices.json
+__pycache__
+config.json
