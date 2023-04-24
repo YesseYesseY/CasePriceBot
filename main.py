@@ -307,7 +307,7 @@ def generate_item_info_embed(inventory_info):
 
     return embed
 
-def generate_price_graph(price_history, inventory):
+def generate_price_graph(price_history, inventory, steamid):
     price_plot = []
     date_plot = []
 
@@ -339,7 +339,15 @@ def generate_price_graph(price_history, inventory):
     ax.yaxis.set_label("Case Prices")
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
     # plt.xticks(rotation=45)
-    plt.savefig('data/myplot.png', format='png', dpi=120)
+    plt.savefig(f'data/userdata/{steamid}/price_chart.png', format='png', dpi=120)
+
+def generate_price_history_embed(price_history, inventory, inventory_info, steamid):
+    generate_price_graph(price_history, inventory, steamid)
+    chart_embed = discord.Embed(title="Price Chart", color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424)
+    chart_embed.set_image(url="attachment://price_chart.png")
+    file = discord.File(f"data/userdata/{steamid}/price_chart.png", filename="price_chart.png")
+    
+    return chart_embed, file
 
 
 if not os.path.exists("data"):
@@ -409,12 +417,9 @@ async def hourly_update():
 
         await channel.send(embed=generate_basic_info_embed(inventory_info))
         await channel.send(embed=generate_item_info_embed(inventory_info))
+        price_chart_embed, price_chart_file = generate_price_history_embed(price_history, inventory, inventory_info, steamid)
+        await channel.send(embed=price_chart_embed, file=price_chart_file)
 
-        generate_price_graph(price_history, inventory)
-        chart_embed = discord.Embed(title="Price Chart", color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424)
-        chart_embed.set_image(url="attachment://myplot.png")
-        file = discord.File("data/myplot.png", filename="myplot.png")
-        await channel.send(embed=chart_embed, file=file)
 
 
 @client.event
