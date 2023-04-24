@@ -1,16 +1,295 @@
+import json
+import os
 import discord
 import asyncio
 import datetime
-import json
-import os
-from csgo import SteamManager
-from discord.ext import tasks
+import csgo
+from discord.ext import tasks, commands
 
-with open('config.json', 'r') as f:
-    config = json.load(f)
+default_channel_info = {
+    "SteamID": 0,
+    "UsersToPing": []
+}
 
-token = config.get('Token')
-if not token:
+default_config = {
+    "Token": "",
+    "Prefix": "§"
+}
+
+def get_inventory(steamid):
+    if not os.path.exists(f"data/userdata/{steamid}/inventory.json"):
+        if not os.path.exists(f"data/userdata/{steamid}"):
+            os.makedirs(f"data/userdata/{steamid}")
+        inventory = csgo.get_inventory(steamid)
+        if not inventory:
+            return None
+        
+        with open(f"data/userdata/{steamid}/inventory.json", "w") as f:
+            json.dump(inventory, f, indent=4)
+        return inventory
+    
+    with open(f"data/userdata/{steamid}/inventory.json", "r") as f:
+        return json.load(f)
+    
+def get_case_prices():
+    return csgo.get_case_prices()
+
+def get_previous_case_prices():
+    if not os.path.exists("data/previous_case_prices.json"):
+        previous_case_prices = get_case_prices()
+        with open("data/previous_case_prices.json", "w") as f:
+            json.dump(previous_case_prices, f, indent=4)
+        return previous_case_prices
+    
+    with open("data/previous_case_prices.json", "r") as f:
+        return json.load(f)
+
+def get_config():
+    config: dict = {}
+
+    if not os.path.exists('config.json'):
+        with open('config.json', 'w') as f:
+            json.dump(default_config, f, indent=4)
+
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+
+    config = default_config | config
+    save_config = False
+    
+    token = config.get('Token')
+    if not token: 
+        print("No token found in config.json!")
+        token = input("Enter token (this will be auto-saved to config.json): ")
+        config['Token'] = token
+
+    if save_config:
+        with open('config.json', 'w') as f:
+            json.dump(config, f, indent=4)
+
+    return config
+
+def seconds_until_00():
+    now = datetime.datetime.now()
+    return (60 - now.minute - 1) * 60 + (60 - now.second)
+
+def get_all_channel_info():
+    if not os.path.exists("data/channeldata/"):
+        os.makedirs(f"data/channeldata/")
+    
+    channel_infos = []
+    
+    for channel in os.listdir("data/channeldata/"):
+        if os.path.isdir(f"data/channeldata/{channel}"):
+            with open(f"data/channeldata/{channel}/channel_info.json", "r") as f:
+                channel_info = json.load(f)
+                channel_info_2 = {
+                    "ChannelID": int(channel),
+                }
+                channel_infos.append(channel_info | channel_info_2)
+    
+    return channel_infos
+
+def get_channel_info(channel_id):
+    if not os.path.exists(f"data/channeldata/{channel_id}/channel_info.json"):
+        return default_channel_info
+    
+    with open(f"data/channeldata/{channel_id}/channel_info.json", "r") as f:
+        return json.load(f)
+
+def update_channel_info(channel_id, updated_info):
+    if not os.path.exists(f"data/channeldata/{channel_id}"):
+        os.makedirs(f"data/channeldata/{channel_id}")
+
+    current_info = {}
+
+    if not os.path.exists(f"data/channeldata/{channel_id}/channel_info.json"):
+        current_info = default_channel_info
+    else:
+        with open(f"data/channeldata/{channel_id}/channel_info.json", "r") as f:
+            current_info = json.load(f)
+
+    current_info_renewed = default_channel_info | current_info
+    
+    with open(f"data/channeldata/{channel_id}/channel_info.json", "w") as f:
+        json.dump(current_info_renewed | updated_info, f, indent=4)
+
+def generate_inventory_info(inventory: list, current_prices: dict, previous_prices: dict, steamid: int):
+    current_total_value = 0
+    previous_total_value = 0
+    items_info = []
+    for item in inventory:
+        if not current_prices.get(item):
+            continue
+        if current_prices.get(item):
+            current_total_value += current_prices.get(item)
+        if previous_prices.get(item):
+            previous_total_value += previous_prices.get(item)
+        
+    for item in list(set(inventory)): # Remove duplicates
+        if not current_prices.get(item):
+            continue
+        amount = inventory.count(item)
+        current_item_price:float = current_prices.get(item)
+        previous_item_price:float = previous_prices.get(item)
+        total_current_item_price = current_item_price * amount
+        total_previous_item_price = previous_item_price * amount
+
+        # Getting highest/lowest price
+        if not os.path.exists(f"data/userdata/{steamid}/items/{item}.json"):
+            if not os.path.exists(f"data/userdata/{steamid}/items/"):
+                os.makedirs(f"data/userdata/{steamid}/items/")
+            with open(f"data/userdata/{steamid}/items/{item}.json", "w") as f:
+                json.dump(
+                    {
+                        "HighestPrice": round(previous_item_price, 2), 
+                        "LowestPrice": round(previous_item_price, 2),
+                        # I'll store the dates but it's not used anywhere yet as i don't know how to make it look nice in an embed
+                        "HighestPriceDate": (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%d/%m/%Y %H:%M:%S"), 
+                        "LowestPriceDate": (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%d/%m/%Y %H:%M:%S")
+                    }, f, indent=4)
+        with open(f"data/userdata/{steamid}/items/{item}.json", "r") as f:
+            item_stats = json.load(f)
+            highest_price = item_stats.get("HighestPrice")
+            lowest_price = item_stats.get("LowestPrice")
+        
+        if current_item_price > highest_price:
+            highest_price = current_item_price
+            item_stats["HighestPrice"] = round(highest_price, 2)
+            item_stats["HighestPriceDate"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        if current_item_price < lowest_price:
+            lowest_price = current_item_price
+            item_stats["LowestPrice"] = round(lowest_price, 2)
+            item_stats["LowestPriceDate"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+        with open(f"data/userdata/{steamid}/items/{item}.json", "w") as f:
+            json.dump(item_stats, f, indent=4)
+
+        item_info = {
+            "Name": item,
+            "Amount": amount,
+            "CurrentPrice": round(current_item_price, 2),
+            "PreviousPrice": round(previous_item_price, 2),
+            "Difference": {
+                "Value": round(abs(current_item_price - previous_item_price), 2),
+                "Prefix": "" if current_item_price == previous_item_price else ("+" if current_item_price > previous_item_price else "-")
+            },
+            "HighestPrice": round(highest_price, 2),
+            "LowestPrice": round(lowest_price, 2),
+            "HighestPriceDate": item_stats.get("HighestPriceDate"),
+            "LowestPriceDate": item_stats.get("LowestPriceDate"),
+
+            "CurrentTotalPrice": round(total_current_item_price, 2),
+            "PreviousTotalPrice": round(total_previous_item_price, 2),
+            "TotalDifference": {
+                "Value": round(abs(total_current_item_price - total_previous_item_price), 2),
+                "Prefix": "" if total_current_item_price == total_previous_item_price else ("+" if total_current_item_price > total_previous_item_price else "-")
+            },
+            "HighestTotalPrice": round(highest_price * amount, 2),
+            "LowestTotalPrice": round(lowest_price * amount, 2)
+        }
+        print(f"Adding {item}")
+        items_info.append(item_info)
+
+    # Getting highest/lowest total price
+    if not os.path.exists(f"data/userdata/{steamid}/inventory_stats.json"):
+        if not os.path.exists(f"data/userdata/{steamid}/"):
+            os.makedirs(f"data/userdata/{steamid}/")
+        with open(f"data/userdata/{steamid}/inventory_stats.json", "w") as f:
+            json.dump(
+                {
+                    "HighestTotalPrice": round(previous_total_value, 2), 
+                    "LowestTotalPrice": round(previous_total_value, 2),
+                    # I'll store the dates but it's not used anywhere yet as i don't know how to make it look nice in an embed
+                    "HighestTotalPriceDate": (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%d/%m/%Y %H:%M:%S"), 
+                    "LowestTotalPriceDate": (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%d/%m/%Y %H:%M:%S")
+                }, f, indent=4)
+    
+    PingUsers = False
+
+    with open(f"data/userdata/{steamid}/inventory_stats.json", "r") as f:
+        inventory_stats = json.load(f)
+        highest_total_price = inventory_stats.get("HighestTotalPrice")
+        lowest_total_price = inventory_stats.get("LowestTotalPrice")
+
+    if current_total_value > highest_total_price:
+        highest_total_price = current_total_value
+        inventory_stats["HighestTotalPrice"] = round(highest_total_price, 2)
+        inventory_stats["HighestTotalPriceDate"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        PingUsers = True
+    if current_total_value < lowest_total_price:
+        lowest_total_price = current_total_value
+        inventory_stats["LowestTotalPrice"] = round(lowest_total_price, 2)
+        inventory_stats["LowestTotalPriceDate"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        PingUsers = True
+
+    with open(f"data/userdata/{steamid}/inventory_stats.json", "w") as f:
+        json.dump(inventory_stats, f, indent=4)
+
+
+    return {
+        "CurrentTotalPrice": round(current_total_value, 2),
+        "PreviousTotalPrice": round(previous_total_value, 2),
+        "TotalDifference": {
+            "Value": round(abs(current_total_value - previous_total_value), 2),
+            "Prefix": "" if current_total_value == previous_total_value else ("+" if current_total_value > previous_total_value else "-")
+        },
+        "HighestTotalPrice": round(highest_total_price, 2),
+        "LowestTotalPrice": round(lowest_total_price, 2),
+        "PingUsers": PingUsers,
+        "Items": items_info
+    }
+
+def generate_basic_info_embed(inventory_info):
+    embed = discord.Embed(
+        title="Inventory info",
+        color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424
+    )
+    embed.set_footer(text="§notify to get notified when the highest/lowest price changes on this inventory!")
+
+    embed.add_field(name="Current Price", value=f"${inventory_info.get('CurrentTotalPrice')}", inline=False)
+    embed.add_field(name="Previous Price", value=f"${inventory_info.get('PreviousTotalPrice')}", inline=False)
+    embed.add_field(name="Difference", value=f"{inventory_info.get('TotalDifference').get('Prefix')}${inventory_info.get('TotalDifference').get('Value')}", inline=False)
+    embed.add_field(name="Highest Price", value=f"${inventory_info.get('HighestTotalPrice')}", inline=False)
+    embed.add_field(name="Lowest Price", value=f"${inventory_info.get('LowestTotalPrice')}", inline=False)
+
+    return embed
+
+def generate_item_info_embed(inventory_info):
+    embed = discord.Embed(
+        title="Item info",
+        color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424
+    )
+    embed.set_footer(text="⚠️ Prices will not always be 100% accurate ⚠️")
+
+    # inline_num = 0
+    for item_info in inventory_info.get("Items"):
+        field_name = "📈 " if item_info.get("Difference").get("Prefix") == "+" else "📉 " if item_info.get("Difference").get("Prefix") == "-" else ""
+        field_name += f"{item_info.get('Name')} ({item_info.get('Amount')})"
+
+        field_value = f"Current Price: ${item_info.get('CurrentPrice')}\n"
+        field_value += f"Previous Price: ${item_info.get('PreviousPrice')}\n"
+        field_value += f"Difference: {item_info.get('Difference').get('Prefix')}${item_info.get('Difference').get('Value')}\n"
+        field_value += f"Current Total Price: ${item_info.get('CurrentTotalPrice')}\n"
+        field_value += f"Previous Total Price: ${item_info.get('PreviousTotalPrice')}\n"
+        field_value += f"Total Difference: {item_info.get('TotalDifference').get('Prefix')}${item_info.get('TotalDifference').get('Value')}\n"
+        field_value += f"Highest Price: ${item_info.get('HighestPrice')}\n"
+        field_value += f"Lowest Price: ${item_info.get('LowestPrice')}\n"
+
+        # inline_num += 1
+        # if inline_num % 2 != 0:
+        #     embed.add_field(name="\u200b", value="\u200b", inline=False)
+        embed.add_field(name=field_name, value=field_value, inline=True)
+
+    return embed
+
+
+if not os.path.exists("data"):
+    os.makedirs("data")
+
+# Config
+config = get_config()
+if not config.get('Token'):
     print("No token found in config.json!")
     exit()
 
@@ -19,283 +298,77 @@ intents.message_content = True
 
 client = discord.Client(intents=intents)
 
-def seconds_until_00():
-    now = datetime.datetime.now()
-    return (60 - now.minute - 1) * 60 + (60 - now.second)
-
-def minutes_until_00():
-    now = datetime.datetime.now()
-    return 60 - now.minute
-
-def get_inventory_safe(steamid):
-    with open(f"inventory_backups/{steamid}.json", "r") as f:
-        inventory = json.load(f)
-
-    return inventory
-
-def add_inventory_safe(steamid):
-    with open(f"inventory_backups/{steamid}.json", "w") as f:
-        inventory = manager.get_inventory(steamid)
-        json.dump(inventory, f, indent=4)
-
-def remove_duplicates(inventory):
-    return list(dict.fromkeys(inventory))
-
-def get_previous_prices():
-    if not os.path.exists("previous_prices.json"):
-        with open("previous_prices.json", "w") as f:
-            json.dump({}, f, indent=4)
-    with open("previous_prices.json", "r") as f:
-        previous_prices = json.load(f)
-
-    return previous_prices
-
-def override_previous_prices(prices):
-    with open("previous_prices.json", "w") as f:
-        json.dump(prices, f, indent=4)
-    
-
-chats_to_update = []
-
-def get_chats_to_update():
-    print("Getting chats to update...")
-    if not os.path.exists("chats_to_update.json"):
-        with open("chats_to_update.json", "w") as f:
-            json.dump([], f, indent=4)
-    with open("chats_to_update.json", "r") as f:
-        chats_to_update = json.load(f)
-
-    for chat in chats_to_update:
-        print(f"Found chat {chat['channel_id']} with steamid {chat['steamid']}")
-
-    return chats_to_update
-
-def override_chats_to_update(chats_to_update):
-    with open("chats_to_update.json", "w") as f:
-        json.dump(chats_to_update, f, indent=4)
-
-
-manager = SteamManager()
-
-def bind_channel(channel_id, steamid):
-    chats_to_update.append({'channel_id': channel_id, 'steamid': steamid})
-
-def get_difference_prefix(new_val, prev_val):
-    if(new_val == prev_val):
-        return ""
-    elif(new_val > prev_val):
-        return "+"
-    else:
-        return "-"
-
 @tasks.loop(hours=1)
-async def inventory_check():
-    print("Inventory Check!")
-    prices = manager.get_case_prices()
-    previous_prices = get_previous_prices()
+async def hourly_update():
+    all_channel_info = get_all_channel_info()
+    current_prices = get_case_prices()
+    if not current_prices:
+        print(f"An error occured while fetching current prices!")
+        return
 
-    if previous_prices == {}:
-        override_previous_prices(prices)
-        previous_prices = prices
-
-    for chat in chats_to_update:
-        steamid = chat['steamid']
-        print(f"Updating {chat['channel_id']} with steamid {steamid}...")
-        channel = client.get_channel(chat['channel_id'])
-        if not channel:
-            print(f"Channel {chat['channel_id']} not found!")
-            continue
-        inventory = get_inventory_safe(steamid)
-        inventory_rd = remove_duplicates(inventory)
-
-        total_value = 0
-        total_previous_value = 0
-        for item in inventory:
-            if(prices.get(item) == None):
-                continue
-            if(previous_prices.get(item) == None):
-                continue
-            total_value += prices.get(item)
-            total_previous_value += previous_prices.get(item)
-
-        if not os.path.exists(f"inventory_info/{steamid}.json"):
-            with open(f"inventory_info/{steamid}.json", "w") as f:
-                json.dump({'highest_value': total_previous_value, 'lowest_value': total_previous_value}, f, indent=4)
-
-        with open(f"inventory_info/{steamid}.json", "r") as f:
-            inventory_info = json.load(f)
-
-        highest_value = inventory_info.get('highest_value')
-        lowest_value = inventory_info.get('lowest_value')
-
-        should_notify = total_value > highest_value or total_value < lowest_value
-
-        if(total_value > highest_value):
-            highest_value = total_value
-        if(total_value < lowest_value):
-            lowest_value = total_value
-
-        with open(f"inventory_info/{steamid}.json", "w") as f:
-            json.dump({'highest_value': highest_value, 'lowest_value': lowest_value}, f, indent=4)
-
-        color = 0xff0000
-
-        if(total_value > total_previous_value):
-            color = 0x00ff00
-
-        basic_info_embed = discord.Embed()
-        basic_info_embed.colour = color
-
-        difference_prefix = get_difference_prefix(total_value, total_previous_value)
-
-        basic_info_embed.add_field(name="Last Price", value=f"${total_previous_value:.2f}", inline=False)
-        basic_info_embed.add_field(name="Current Price", value=f"${total_value:.2f}", inline=False)
-        basic_info_embed.add_field(name="Difference", value=f"{difference_prefix}${abs(total_value - total_previous_value):.2f}", inline=False)
-        basic_info_embed.add_field(name="Highest Price", value=f"${highest_value:.2f}", inline=False)
-        basic_info_embed.add_field(name="Lowest Price", value=f"${lowest_value:.2f}", inline=False)
-
-        basic_info_embed.set_footer(text="§notify to get notified when the highest/lowest price changes on this inventory!")
-
-        basic_info_message = ""
-
-        if chat.get('notify') != None:
-            for user in chat.get('notify'):
-                basic_info_message += f"<@{user}> "
-
-        await channel.send(basic_info_message if should_notify else "", embed=basic_info_embed)
-
-        case_prices_embed = discord.Embed()
-        case_prices_embed.colour = color
-        case_prices_embed.set_footer(text="⚠️ Prices will never be 100% accurate ⚠️")
-
-        for item in inventory_rd:
-            if(prices.get(item) == None):
-                continue
-            if(previous_prices.get(item) == None):
-                continue
-
-            total_value = prices.get(item) * inventory.count(item)
-            total_previous_value = previous_prices.get(item) * inventory.count(item)
-            difference = prices.get(item) - previous_prices.get(item)
-            total_difference = total_value - total_previous_value
-
-            difference_prefix = get_difference_prefix(total_value, total_previous_value)
-
-            item_file_name = item
-
-            if not os.path.exists(f"inventory_info/{steamid}/{item_file_name}.json"):
-                # create directory
-                if not os.path.exists(f"inventory_info/{steamid}"):
-                    os.makedirs(f"inventory_info/{steamid}")
-
-                with open(f"inventory_info/{steamid}/{item_file_name}.json", "w") as f:
-                    json.dump({'highest_value': total_previous_value, 'lowest_value': total_previous_value}, f, indent=4)
-
-            with open(f"inventory_info/{steamid}/{item_file_name}.json", "r") as f:
-                item_info = json.load(f)
-
-            highest_value = item_info.get('highest_value')
-            lowest_value = item_info.get('lowest_value')
-
-            if(total_value > highest_value):
-                highest_value = total_value
-            if(total_value < lowest_value):
-                lowest_value = total_value
-
-            with open(f"inventory_info/{steamid}/{item_file_name}.json", "w") as f:
-                json.dump({'highest_value': highest_value, 'lowest_value': lowest_value}, f, indent=4)
-            
-            field_val = ""
-            field_val += f"Previous: ${previous_prices.get(item):.2f}\n"
-            field_val += f"Current: ${prices.get(item):.2f}\n"
-            field_val += f"Total: ${total_value:.2f}\n"
-            field_val += f"Difference: {difference_prefix}${abs(difference):.2f}\n"
-            field_val += f"Total Difference: {difference_prefix}${abs(total_difference):.2f}\n"
-            field_val += f"Highest Price: ${highest_value:.2f}\n"
-            field_val += f"Lowest Price: ${lowest_value:.2f}"
-
-            field_name = ""
-            if(total_value > total_previous_value):
-                field_name += "📈 "
-            elif(total_value < total_previous_value):
-                field_name += "📉 "
-            
-            field_name += f"{item} ({inventory.count(item)})"
-            case_prices_embed.add_field(name=field_name, value=field_val, inline=True)
-
-        await channel.send(embed=case_prices_embed)
-
-    override_previous_prices(prices)
-
-@client.event
-async def on_ready():
-    print(f'We have logged in as {client.user}')
-    await inventory_check()
-    await asyncio.sleep(seconds_until_00())
-    inventory_check.start()
+    previous_prices = get_previous_case_prices()
+    if not previous_prices:
+        print(f"An error occured while fetching previous prices!")
+        return
     
+    for channel_info in all_channel_info:
+        steamid = channel_info.get("SteamID")
+        if not steamid:
+            print(f"Invalid steamid {steamid}!")
+            continue
+
+        channelid = channel_info.get("ChannelID")
+        channel = client.get_channel(channelid)
+
+        if not channel:
+            print(f"Channel {channelid} not found!")
+            continue
+
+        inventory = get_inventory(steamid)
+        if not inventory:
+            print(f"An error occured while fetching inventory for {steamid}!")
+            continue
+
+        inventory_info = generate_inventory_info(inventory, current_prices, previous_prices, steamid)
+
+        await channel.send(embed=generate_basic_info_embed(inventory_info))
+        await channel.send(embed=generate_item_info_embed(inventory_info))
+
 @client.event
 async def on_message(message: discord.Message):
     if message.author == client.user:
         return
-
-    if message.content.startswith('§bind '):
-        for chat in chats_to_update:
-            if chat['channel_id'] == message.channel.id:
-                await message.channel.send("This channel is already bound to a steamid!")
-                return
-            
-        
-        if len(message.content.split(' ')) != 2:
-            await message.channel.send("Invalid command! Please use §bind <steamid>")
+    
+    # §bind <steamid>
+    if message.content.startswith("§bind"):
+        steamid = message.content.split(" ")[1]
+        if not steamid:
+            await message.channel.send("Please enter a steamid!")
             return
         
-        steamid = message.content.split(' ')[1]
+        update_channel_info(message.channel.id, {"SteamID": steamid})
+
+    # §unbind <steamid>
+    if message.content.startswith("§unbind"):
+        steamid = message.content.split(" ")[1]
+        if not steamid:
+            await message.channel.send("Please enter a steamid!")
+            return
         
-        # inform the user if the steamid already is bound to a channel, but dont stop the command
-        for chat in chats_to_update:
-            if chat['steamid'] == steamid:
-                await message.channel.send(f"Warning: {steamid} is already bound to a channel! If you want to unbind a channel use §unbind <steamid>")
-                break
+        update_channel_info(message.channel.id, {"SteamID": 0})
 
-        # check if inventory_backups/steamid.json exists
-        if not os.path.exists(f"inventory_backups/{steamid}.json"):
-            inventory = manager.get_inventory(steamid)
-            if not inventory:
-                await message.channel.send("Error getting inventory. Error Code: 429")
-                return
+    # §notify
+    if message.content.startswith("§notify"):
+        current_channel_info = get_channel_info(message.channel.id)
+        update_channel_info(message.channel.id, {"UsersToPing": current_channel_info.get("UsersToPing") + [message.author.id]})
 
-            with open(f"inventory_backups/{steamid}.json", "w") as f:
-                json.dump(inventory, f, indent=4)
+@client.event
+async def on_ready():
+    print(f'We have logged in as {client.user}')
+    if input("Do you want to do the hourly update now? (y/n) ").lower() == "y":
+        await hourly_update()
+    await asyncio.sleep(seconds_until_00())
+    hourly_update.start()
 
-        bind_channel(message.channel.id, steamid)
-        override_chats_to_update(chats_to_update)
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{len(chats_to_update)} inventories"))
-
-        await message.channel.send(f"Successfully bound channel to {steamid}! Next update will be in {minutes_until_00()} minutes.")
-
-    if message.content.startswith('§unbind'):
-        for chat in chats_to_update:
-            if chat['channel_id'] == message.channel.id:
-                chats_to_update.remove(chat)
-                override_chats_to_update(chats_to_update)
-                await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{len(chats_to_update)} inventories"))
-                await message.channel.send("Successfully unbound channel!")
-                return
-            
-    if message.content.startswith('§notify'):
-        for chat in chats_to_update:
-            if chat['channel_id'] == message.channel.id:
-                if chat.get('notify') == None:
-                    chat['notify'] = []
-
-                chat.get('notify').append(message.author.id) 
-                override_chats_to_update(chats_to_update)
-                await message.channel.send(f"Successfully enabled notifications for this inventory!")
-                return
-        
-        await message.channel.send("This channel is not bound to a steamid!")
-
-chats_to_update = get_chats_to_update()
-client.activity = discord.Activity(type=discord.ActivityType.watching, name=f"{len(chats_to_update)} inventories")
-client.run(token)
+client.activity = discord.Activity(type=discord.ActivityType.watching, name="? inventories")
+client.run(config.get('Token'))

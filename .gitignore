@@ -4,3 +4,5 @@ chats_to_update.json
 previous_prices.json
 __pycache__
 config.json
+data
+old
