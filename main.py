@@ -390,7 +390,7 @@ async def on_ready():
     print(f'We have logged in as {client.user}')
     if input("Do you want to do the hourly update now? (y/n) ").lower() == "y":
         await hourly_update()
-    await asyncio.sleep(time_until(Hour=1, Minute=0, Second=0, AddHour=True))
+    await asyncio.sleep(time_until(Hour=1, Minute=0, Second=0, AddHour=True).total_seconds())
     hourly_update.start()
 
 client.activity = discord.Activity(type=discord.ActivityType.watching, name="? inventories")
