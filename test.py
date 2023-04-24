@@ -1,32 +1,48 @@
 import datetime
 import time
+import csgo
+import json
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
-def time_until(Year=None,     Month=None,     Day=None,     Hour=None,     Minute=None,     Second=None,
-               AddYear=False, AddMonth=False, AddDay=False, AddHour=False, AddMinute=False, AddSecond=False):
-    now = datetime.datetime.now()
+def generate_price_graph(price_history, inventory):
+    price_plot = []
+    date_plot = []
 
-    FinalYear = Year if Year is not None and not AddYear else now.year
-    FinalMonth = Month if Month is not None and not AddMonth else now.month
-    FinalDay = Day if Day is not None and not AddDay else now.day
-    FinalHour = Hour if Hour is not None and not AddHour else now.hour
-    FinalMinute = Minute if Minute is not None and not AddMinute else now.minute
-    FinalSecond = Second if Second is not None and not AddSecond else now.second
-    
-    if AddYear and Year is not None:
-        FinalYear += Year
-    if AddMonth and Month is not None:
-        FinalMonth += Month
-    if AddDay and Day is not None:
-        FinalDay += Day
-    if AddHour and Hour is not None:
-        FinalHour += Hour
-    if AddMinute and Minute is not None:
-        FinalMinute += Minute
-    if AddSecond and Second is not None:
-        FinalSecond += Second
-        
-    then = datetime.datetime(FinalYear, FinalMonth, FinalDay, FinalHour, FinalMinute, FinalSecond)
-    return then - now
+    for price_data in price_history:
+        price_time = datetime.datetime.fromtimestamp(price_data["Time"])
+        prices = price_data["Prices"]
+        # Filter out stuff from inventory that is not in the prices
+        inventory = [item for item in inventory if item in prices]
 
-print(time_until(Hour=16, Minute=0, Second=0).total_seconds())
-print(time_until(Hour=1, Minute=0, Second=0, AddHour=True).total_seconds())
+        total_price_of_inventory = 0
+
+        for item in inventory:
+            price = prices[item]
+            total_price_of_inventory += price
+
+        price_plot.append(total_price_of_inventory)
+        date_plot.append(price_time)
+
+
+    fig, ax = plt.subplots(figsize=(16, 9), facecolor="#333333")
+    ax.plot(date_plot, price_plot)
+    for i in range(1, len(price_plot)):
+        if price_plot[i] > price_plot[i-1]:
+            color = 'green'
+        else:
+            color = 'red'
+        ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
+    ax.set_facecolor('#444444')
+    ax.yaxis.set_label("Case Prices")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
+    # plt.xticks(rotation=45)
+    plt.savefig('myplot.png', format='png', dpi=120)
+
+with open("data/price_history.json", "r") as f:
+    price_history = json.load(f)
+
+with open("data/userdata/76561198179624574/inventory.json", "r") as f:
+    inventory = json.load(f)
+
+generate_price_graph(price_history, inventory)

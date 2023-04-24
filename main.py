@@ -5,6 +5,8 @@ import asyncio
 import datetime
 import csgo
 from discord.ext import tasks, commands
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 default_channel_info = {
     "SteamID": 0,
@@ -211,7 +213,6 @@ def generate_inventory_info(inventory: list, current_prices: dict, previous_pric
             "HighestTotalPrice": round(highest_price * amount, 2),
             "LowestTotalPrice": round(lowest_price * amount, 2)
         }
-        print(f"Adding {item}")
         items_info.append(item_info)
 
     # Getting highest/lowest total price
@@ -306,6 +307,40 @@ def generate_item_info_embed(inventory_info):
 
     return embed
 
+def generate_price_graph(price_history, inventory):
+    price_plot = []
+    date_plot = []
+
+    for price_data in price_history:
+        price_time = datetime.datetime.fromtimestamp(price_data["Time"])
+        prices = price_data["Prices"]
+        # Filter out stuff from inventory that is not in the prices
+        inventory = [item for item in inventory if item in prices]
+
+        total_price_of_inventory = 0
+
+        for item in inventory:
+            price = prices[item]
+            total_price_of_inventory += price
+
+        price_plot.append(total_price_of_inventory)
+        date_plot.append(price_time)
+
+
+    fig, ax = plt.subplots(figsize=(16, 9), facecolor="#333333")
+    ax.plot(date_plot, price_plot)
+    for i in range(1, len(price_plot)):
+        if price_plot[i] > price_plot[i-1]:
+            color = 'green'
+        else:
+            color = 'red'
+        ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
+    ax.set_facecolor('#444444')
+    ax.yaxis.set_label("Case Prices")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
+    # plt.xticks(rotation=45)
+    plt.savefig('data/myplot.png', format='png', dpi=120)
+
 
 if not os.path.exists("data"):
     os.makedirs("data")
@@ -328,11 +363,27 @@ async def hourly_update():
     if not current_prices:
         print(f"An error occured while fetching current prices!")
         return
-
+    
     previous_prices = get_previous_case_prices()
     if not previous_prices:
         print(f"An error occured while fetching previous prices!")
         return
+    
+    now = datetime.datetime.now()
+    if not os.path.exists("data/price_history.json"):
+        with open("data/price_history.json", "w") as f:
+            json.dump([{
+                "Time": datetime.datetime(now.year, now.month, now.day, now.hour - 1, now.minute, now.second, now.microsecond).timestamp(),
+                "Prices": previous_prices
+            }], f, indent=4)
+    with open("data/price_history.json", "r") as f:
+        price_history = json.load(f)
+    price_history.append({
+        "Time": datetime.datetime(now.year, now.month, now.day, now.hour, now.minute, now.second, now.microsecond).timestamp(),
+        "Prices": current_prices
+    })
+    with open("data/price_history.json", "w") as f:
+        json.dump(price_history, f, indent=4)
     
     for channel_info in all_channel_info:
         steamid = channel_info.get("SteamID")
@@ -347,6 +398,8 @@ async def hourly_update():
             print(f"Channel {channelid} not found!")
             continue
 
+        print(f"Updating inventory for {steamid} in {channelid}...")
+
         inventory = get_inventory(steamid)
         if not inventory:
             print(f"An error occured while fetching inventory for {steamid}!")
@@ -356,6 +409,13 @@ async def hourly_update():
 
         await channel.send(embed=generate_basic_info_embed(inventory_info))
         await channel.send(embed=generate_item_info_embed(inventory_info))
+
+        generate_price_graph(price_history, inventory)
+        chart_embed = discord.Embed(title="Price Chart", color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424)
+        chart_embed.set_image(url="attachment://myplot.png")
+        file = discord.File("data/myplot.png", filename="myplot.png")
+        await channel.send(embed=chart_embed, file=file)
+
 
 @client.event
 async def on_message(message: discord.Message):
