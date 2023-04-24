@@ -322,10 +322,9 @@ def generate_price_graph(price_history, inventory, steamid):
         for item in inventory:
             price = prices[item]
             total_price_of_inventory += price
-
+            
         price_plot.append(total_price_of_inventory)
         date_plot.append(price_time)
-
 
     fig, ax = plt.subplots(figsize=(16, 9), facecolor="#333333")
     ax.plot(date_plot, price_plot)
@@ -334,20 +333,28 @@ def generate_price_graph(price_history, inventory, steamid):
             color = 'green'
         else:
             color = 'red'
+        ax.scatter(date_plot[i], price_plot[i], color=color, s=25, zorder=10)
         ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
     ax.set_facecolor('#444444')
     ax.yaxis.set_label("Case Prices")
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
+    ax.grid(color='#555555', linestyle='-', linewidth=1)
     # plt.xticks(rotation=45)
     plt.savefig(f'data/userdata/{steamid}/price_chart.png', format='png', dpi=120)
+    # return dictionary of date and price
+    return {date_plot[i].strftime("%B %d %Y %H:%M"): round(price_plot[i], 2) for i in range(len(date_plot))}
 
 def generate_price_history_embed(price_history, inventory, inventory_info, steamid):
-    generate_price_graph(price_history, inventory, steamid)
+    price_chart_data = generate_price_graph(price_history, inventory, steamid)
     chart_embed = discord.Embed(title="Price Chart", color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424)
     chart_embed.set_image(url="attachment://price_chart.png")
+    chart_embed.set_footer(text="Do you want the exact data for this chart? Type §chartdata and the bot will send you it!")
     file = discord.File(f"data/userdata/{steamid}/price_chart.png", filename="price_chart.png")
-    
-    return chart_embed, file
+    with open(f"data/userdata/{steamid}/price_chart_data.json", "w") as f:
+        json.dump(price_chart_data, f, indent=4)
+    price_chart_data_file = discord.File(f"data/userdata/{steamid}/price_chart_data.json", filename="price_chart_data.json")
+
+    return chart_embed, file, price_chart_data_file
 
 
 if not os.path.exists("data"):
@@ -420,8 +427,8 @@ async def hourly_update():
 
         await channel.send(embed=generate_basic_info_embed(inventory_info))
         await channel.send(embed=generate_item_info_embed(inventory_info))
-        price_chart_embed, price_chart_file = generate_price_history_embed(price_history, inventory, inventory_info, steamid)
-        await channel.send(embed=price_chart_embed, file=price_chart_file)
+        price_chart_embed, price_chart_file, price_chart_data_file = generate_price_history_embed(price_history, inventory, inventory_info, steamid)
+        await channel.send(embed=price_chart_embed, files=price_chart_file)
 
 
 
@@ -452,6 +459,12 @@ async def on_message(message: discord.Message):
     if message.content.startswith("§notify"):
         current_channel_info = get_channel_info(message.channel.id)
         update_channel_info(message.channel.id, {"UsersToPing": current_channel_info.get("UsersToPing") + [message.author.id]})
+
+    # §chartdata
+    if message.content.startswith("§chartdata"):
+        steamid = get_channel_info(message.channel.id).get("SteamID")
+        await message.channel.send(file=discord.File(f"data/userdata/{steamid}/price_chart_data.json", filename="price_chart_data.json"))
+
 
 @client.event
 async def on_ready():
