@@ -377,6 +377,9 @@ async def hourly_update():
         print(f"An error occured while fetching previous prices!")
         return
     
+    with open("data/previous_case_prices.json", "w") as f:
+        json.dump(current_prices, f, indent=4)
+    
     now = datetime.datetime.now()
     if not os.path.exists("data/price_history.json"):
         with open("data/price_history.json", "w") as f:

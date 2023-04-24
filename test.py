@@ -33,6 +33,8 @@ def generate_price_graph(price_history, inventory):
         else:
             color = 'red'
         ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
+    for i in range(len(date_plot)):
+        ax.text(date_plot[i], price_plot[i], str(price_plot[i]), ha='center', va='bottom', color='white')
     ax.set_facecolor('#444444')
     ax.yaxis.set_label("Case Prices")
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
