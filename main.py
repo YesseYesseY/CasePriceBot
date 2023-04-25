@@ -81,7 +81,8 @@ def time_until(Year=None,     Month=None,     Day=None,     Hour=None,     Minut
     FinalHour = Hour if Hour is not None and not AddHour else now.hour
     FinalMinute = Minute if Minute is not None and not AddMinute else now.minute
     FinalSecond = Second if Second is not None and not AddSecond else now.second
-    
+
+    # TODO: Fix error when adding time over 23 hours, 59 minutes, etc.
     if AddYear and Year is not None:
         FinalYear += Year
     if AddMonth and Month is not None:
@@ -341,8 +342,10 @@ def generate_price_graph(price_history, inventory, steamid):
     ax.grid(color='#555555', linestyle='-', linewidth=1)
     # plt.xticks(rotation=45)
     plt.savefig(f'data/userdata/{steamid}/price_chart.png', format='png', dpi=120)
+    plt.close()
     # return dictionary of date and price
     return {date_plot[i].strftime("%B %d %Y %H:%M"): round(price_plot[i], 2) for i in range(len(date_plot))}
+
 
 def generate_price_history_embed(price_history, inventory, inventory_info, steamid):
     price_chart_data = generate_price_graph(price_history, inventory, steamid)
@@ -428,7 +431,7 @@ async def hourly_update():
         await channel.send(embed=generate_basic_info_embed(inventory_info))
         await channel.send(embed=generate_item_info_embed(inventory_info))
         price_chart_embed, price_chart_file, price_chart_data_file = generate_price_history_embed(price_history, inventory, inventory_info, steamid)
-        await channel.send(embed=price_chart_embed, files=price_chart_file)
+        await channel.send(embed=price_chart_embed, file=price_chart_file)
 
 
 
