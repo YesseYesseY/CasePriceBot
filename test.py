@@ -2,8 +2,16 @@ import datetime
 import time
 import csgo
 import json
+import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+
+def get_inventory_updates(steamid):
+    if not os.path.exists(f"data/userdata/{steamid}/inventory_updates.json"):
+        return []
+    
+    with open(f"data/userdata/{steamid}/inventory_updates.json", "r") as f:
+        return json.load(f)
 
 def generate_price_graph(price_history, inventory):
     price_plot = []
@@ -35,6 +43,13 @@ def generate_price_graph(price_history, inventory):
         ax.scatter(date_plot[i], price_plot[i], color=color, s=25, zorder=10)
         ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
         # ax.text(date_plot[i], price_plot[i], str(round(price_plot[i], 2)), ha='center', va='baseline', color='white', zorder=11, size=16)
+        # ax.axvline(x=date_plot[i], color='white', linestyle='--', linewidth=2, zorder=9)
+        # ax.text(date_plot[i], 1.01, "Inventory Change", ha='left', va='bottom', color='white', zorder=120, size=12, transform=ax.get_xaxis_transform(), rotation=25)
+    
+    for update in get_inventory_updates("76561198395558355"):
+        ax.axvline(x=datetime.datetime.fromtimestamp(update), color='white', linestyle='--', linewidth=2, zorder=9)
+        ax.text(datetime.datetime.fromtimestamp(update), 1.01, "Inventory Change", ha='left', va='bottom', color='white', zorder=120, size=12, transform=ax.get_xaxis_transform(), rotation=25)
+
     # for i in range(len(date_plot)):
     #     ax.text(date_plot[i], price_plot[i], str(price_plot[i]), ha='center', va='bottom', color='white')
     # for i in range(len(date_plot)):
@@ -52,7 +67,7 @@ def generate_price_graph(price_history, inventory):
 with open("data/price_history.json", "r") as f:
     price_history = json.load(f)
 
-with open("data/userdata/76561198179624574/inventory.json", "r") as f:
+with open("data/userdata/76561198395558355/inventory.json", "r") as f:
     inventory = json.load(f)
 
 generate_price_graph(price_history, inventory)

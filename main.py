@@ -33,6 +33,37 @@ def get_inventory(steamid):
     with open(f"data/userdata/{steamid}/inventory.json", "r") as f:
         return json.load(f)
     
+def update_inventory(steamid): # This should not be used yet, it messes up the graph values
+    if not os.path.exists(f"data/userdata/{steamid}/inventory.json"):
+        return None
+    
+    inventory = csgo.get_inventory(steamid)
+    if not inventory:
+        return None
+    
+    with open(f"data/userdata/{steamid}/inventory.json", "w") as f:
+        json.dump(inventory, f, indent=4)
+
+    if not os.path.exists(f"data/userdata/{steamid}/inventory_updates.json"):
+        with open(f"data/userdata/{steamid}/inventory_updates.json", "w") as f:
+            json.dump([], f, indent=4)
+
+    with open(f"data/userdata/{steamid}/inventory_updates.json", "r") as f:
+        inventory_updates = json.load(f)
+        inventory_updates.append(datetime.datetime.now().timestamp())
+        
+    with open(f"data/userdata/{steamid}/inventory_updates.json", "w") as f:
+        json.dump(inventory_updates, f, indent=4)
+
+    return inventory
+
+def get_inventory_updates(steamid):
+    if not os.path.exists(f"data/userdata/{steamid}/inventory_updates.json"):
+        return []
+    
+    with open(f"data/userdata/{steamid}/inventory_updates.json", "r") as f:
+        return json.load(f)
+    
 def get_case_prices():
     return csgo.get_case_prices()
 
@@ -270,7 +301,7 @@ def generate_basic_info_embed(inventory_info):
         title="Inventory info",
         color=0x00ff00 if inventory_info.get("TotalDifference").get("Prefix") == "+" else 0xff0000 if inventory_info.get("TotalDifference").get("Prefix") == "-" else 0x242424
     )
-    embed.set_footer(text="§notify to get notified when the highest/lowest price changes on this inventory!")
+    embed.set_footer(text="Is your inventory not up to date? Type §updateinv to update it!")
 
     embed.add_field(name="Current Price", value=f"${inventory_info.get('CurrentTotalPrice')}", inline=False)
     embed.add_field(name="Previous Price", value=f"${inventory_info.get('PreviousTotalPrice')}", inline=False)
@@ -294,10 +325,12 @@ def generate_item_info_embed(inventory_info):
 
         field_value = f"Current Price: ${item_info.get('CurrentPrice')}\n"
         field_value += f"Previous Price: ${item_info.get('PreviousPrice')}\n"
-        field_value += f"Difference: {item_info.get('Difference').get('Prefix')}${item_info.get('Difference').get('Value')}\n"
+        field_value += f"Difference: {item_info.get('Difference').get('Prefix')}${item_info.get('Difference').get('Value')}\n\n"
+
         field_value += f"Current Total Price: ${item_info.get('CurrentTotalPrice')}\n"
         field_value += f"Previous Total Price: ${item_info.get('PreviousTotalPrice')}\n"
-        field_value += f"Total Difference: {item_info.get('TotalDifference').get('Prefix')}${item_info.get('TotalDifference').get('Value')}\n"
+        field_value += f"Total Difference: {item_info.get('TotalDifference').get('Prefix')}${item_info.get('TotalDifference').get('Value')}\n\n"
+
         field_value += f"Highest Price: ${item_info.get('HighestPrice')}\n"
         field_value += f"Lowest Price: ${item_info.get('LowestPrice')}\n"
 
@@ -336,6 +369,11 @@ def generate_price_graph(price_history, inventory, steamid):
             color = 'red'
         ax.scatter(date_plot[i], price_plot[i], color=color, s=25, zorder=10)
         ax.plot([date_plot[i-1], date_plot[i]], [price_plot[i-1], price_plot[i]], color=color)
+
+    for update in get_inventory_updates(steamid):
+        ax.axvline(x=datetime.datetime.fromtimestamp(update), color='white', linestyle='--', linewidth=2, zorder=9)
+        ax.text(datetime.datetime.fromtimestamp(update), 1.01, "Inventory Change", ha='left', va='bottom', color='white', zorder=120, size=12, transform=ax.get_xaxis_transform(), rotation=25)
+    
     ax.set_facecolor('#444444')
     ax.yaxis.set_label("Case Prices")
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d %H:%M'))
@@ -345,7 +383,6 @@ def generate_price_graph(price_history, inventory, steamid):
     plt.close()
     # return dictionary of date and price
     return {date_plot[i].strftime("%B %d %Y %H:%M"): round(price_plot[i], 2) for i in range(len(date_plot))}
-
 
 def generate_price_history_embed(price_history, inventory, inventory_info, steamid):
     price_chart_data = generate_price_graph(price_history, inventory, steamid)
@@ -458,16 +495,28 @@ async def on_message(message: discord.Message):
         
         update_channel_info(message.channel.id, {"SteamID": 0})
 
-    # §notify
-    if message.content.startswith("§notify"):
-        current_channel_info = get_channel_info(message.channel.id)
-        update_channel_info(message.channel.id, {"UsersToPing": current_channel_info.get("UsersToPing") + [message.author.id]})
-
     # §chartdata
     if message.content.startswith("§chartdata"):
         steamid = get_channel_info(message.channel.id).get("SteamID")
         await message.channel.send(file=discord.File(f"data/userdata/{steamid}/price_chart_data.json", filename="price_chart_data.json"))
 
+    # §updateinv
+    # this is for manual updating of the inventory
+    # if i do it every hour i will be rate limited
+    # this does mess up the prices on the graph
+    # ill fix it later with inventory snapshots
+    if message.content.startswith("§update"):
+        steamid = get_channel_info(message.channel.id).get("SteamID")
+        if not steamid:
+            await message.channel.send("Please bind a steamid first!")
+            return
+        
+        update = update_inventory(steamid)
+        if not update:
+            await message.channel.send("An error occured while updating your inventory!")
+            return
+        
+        await message.channel.send(f"Inventory updated!")
 
 @client.event
 async def on_ready():
