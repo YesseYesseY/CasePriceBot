@@ -88,17 +88,20 @@ def get_config():
         config = json.load(f)
 
     config = default_config | config
-    save_config = False
     
     token = config.get('Token')
     if not token: 
-        print("No token found in config.json!")
-        token = input("Enter token (this will be auto-saved to config.json): ")
-        config['Token'] = token
+        print("No token found in config.json, attempting to get token from environment variables...")
+        if os.environ.get('BotToken') is not None:
+            token = os.environ.get('BotToken')
+            print("Token found in environment variables, saving to config.json...")
 
-    if save_config:
-        with open('config.json', 'w') as f:
-            json.dump(config, f, indent=4)
+    if not token:
+        token = input("Enter token (this will be auto-saved to config.json): ")
+        
+    config['Token'] = token
+    with open('config.json', 'w') as f:
+        json.dump(config, f, indent=4)
 
     return config
 
